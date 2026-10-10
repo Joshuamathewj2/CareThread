@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: ./server
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/carethread.db
+    volumes:
+      # Mount the db file so it persists across container restarts during the demo
+      - carethread_data:/app
+
+  simulator:
+    build:
+      context: ./simulator
+    ports:
+      - "8080:80"
+    depends_on:
+      - server
+
+volumes:
+  carethread_data:
