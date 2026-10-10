@@ -1,13 +1,17 @@
 import Database from 'better-sqlite3';
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { seedDemo } from './seed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-export function setupDatabase(dbPath = ':memory:') {
-  const db = new Database(dbPath);
+export function setupDatabase(dbPath?: string) {
+  const resolvedPath = dbPath || process.env.DATABASE_PATH || join(__dirname, '..', '..', 'carethread.db');
+  const isMemory = resolvedPath === ':memory:';
+  
+  const db = new Database(resolvedPath);
   
   // Enable foreign keys
   db.pragma('foreign_keys = ON');
@@ -36,7 +40,13 @@ export function setupDatabase(dbPath = ':memory:') {
     db.prepare(`INSERT INTO schema_migrations (version, applied_at) VALUES (1, datetime('now'))`).run();
   }
 
+  // Auto-seed if database is empty
+  const circleCount = db.prepare(`SELECT count(*) as count FROM care_circles`).get() as { count: number };
+  if (circleCount.count === 0) {
+    seedDemo(db);
+  }
+
   return db;
 }
 
-export const db = setupDatabase(process.env.DATABASE_PATH || ':memory:');
+export const db = setupDatabase();

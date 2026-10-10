@@ -1,0 +1,261 @@
+[
+  {
+    "id": "RF-01",
+    "level": "emergency",
+    "title": "Possible stroke signs",
+    "triggers": [
+      ["face", "droop"],
+      ["slurred", "speech"],
+      ["arm", "weak"],
+      ["sudden", "numbness"]
+    ],
+    "keywords": ["droop", "slurred", "slur", "stroke", "arm weak", "facial drooping"],
+    "negation_tokens": ["no", "without", "not", "denies"],
+    "instruction": "Call {emergencyNumber} now. These can be signs of a stroke, and time matters.",
+    "followUp": "Note the time the signs started.",
+    "source": "https://www.nhs.uk/conditions/stroke/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-02",
+    "level": "emergency",
+    "title": "Chest pain or pressure",
+    "triggers": [
+      ["chest", "pain"],
+      ["tight", "chest"],
+      ["pressure", "chest"],
+      ["pain", "jaw"],
+      ["pain", "arm"]
+    ],
+    "keywords": ["chest pain", "tight chest", "chest pressure", "heart attack", "angina"],
+    "negation_tokens": ["no", "without", "not", "denies"],
+    "instruction": "Call {emergencyNumber} now. This can be a sign of a heart attack.",
+    "followUp": "Have the person sit down and rest.",
+    "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/heart-attack",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-03",
+    "level": "emergency",
+    "title": "Severe breathing difficulty",
+    "triggers": [
+      ["can't", "breathe"],
+      ["gasping"],
+      ["lips", "blue"],
+      ["struggling", "breathe"]
+    ],
+    "keywords": ["can't breathe", "cannot breathe", "gasping", "blue lips", "struggling to breathe"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Call {emergencyNumber} now. Severe breathing difficulty is an emergency.",
+    "followUp": "Help the person sit upright.",
+    "source": "https://www.nhs.uk/conditions/shortness-of-breath/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-04",
+    "level": "emergency",
+    "title": "Unresponsive or not breathing",
+    "triggers": [
+      ["won't", "wake"],
+      ["unconscious"],
+      ["not", "breathing"],
+      ["collapsed"]
+    ],
+    "keywords": ["won't wake up", "unconscious", "not breathing", "collapsed", "unresponsive"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Call {emergencyNumber} now. The person is unresponsive.",
+    "followUp": "Check if their chest is rising and falling.",
+    "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/unresponsive-and-breathing",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-05",
+    "level": "emergency",
+    "title": "Severe bleeding",
+    "triggers": [
+      ["bleeding", "won't", "stop"],
+      ["blood", "everywhere"],
+      ["spurting"]
+    ],
+    "keywords": ["bleeding won't stop", "deep cut spurting", "blood everywhere", "severe bleeding"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Call {emergencyNumber} now for severe uncontrolled bleeding.",
+    "followUp": "Apply firm direct pressure to the wound with a clean cloth.",
+    "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/bleeding-heavily",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-06",
+    "level": "emergency",
+    "title": "Choking",
+    "triggers": [
+      ["choking"],
+      ["can't", "swallow"],
+      ["food", "stuck"]
+    ],
+    "keywords": ["choking", "food stuck and turning blue", "can't speak and choking"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Call {emergencyNumber} now. The person is choking.",
+    "followUp": "Give up to five back blows between the shoulder blades.",
+    "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/choking",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-07",
+    "level": "emergency",
+    "title": "Suspected overdose or poisoning",
+    "triggers": [
+      ["too", "many", "tablets"],
+      ["swallowed", "cleaning"],
+      ["overdose"],
+      ["poison"]
+    ],
+    "keywords": ["took too many tablets", "swallowed cleaning product", "overdose", "double dose and drowsy"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Call {emergencyNumber} or poison control now. Keep the medication packaging ready.",
+    "followUp": "Do not attempt to make them vomit.",
+    "source": "https://www.nhs.uk/conditions/poisoning/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-08",
+    "level": "emergency",
+    "title": "Seizure",
+    "triggers": [
+      ["seizure"],
+      ["fitting"],
+      ["convulsing"]
+    ],
+    "keywords": ["having a seizure", "fitting", "convulsing", "shaking and unresponsive"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Call {emergencyNumber} now. The person is having a seizure.",
+    "followUp": "Protect their head and clear the area around them.",
+    "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/seizures",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-09",
+    "level": "emergency",
+    "title": "Serious fall",
+    "triggers": [
+      ["fell", "hit", "head"],
+      ["can't", "get", "up"],
+      ["hip", "pain", "fall"]
+    ],
+    "keywords": ["fell and hit head", "can't get up after a fall", "hip pain after a fall"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Call {emergencyNumber} now. Suspected serious injury or head trauma from a fall.",
+    "followUp": "Keep them still and warm until help arrives.",
+    "source": "https://www.nhs.uk/conditions/falls/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-10",
+    "level": "emergency",
+    "title": "Severe allergic reaction",
+    "triggers": [
+      ["swollen", "lips"],
+      ["swollen", "tongue"],
+      ["hives", "breathing"],
+      ["anaphylaxis"]
+    ],
+    "keywords": ["swollen lips", "swollen tongue", "hives and trouble breathing", "anaphylaxis"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Call {emergencyNumber} now for a severe allergic reaction.",
+    "followUp": "Use an adrenaline auto-injector if available and trained.",
+    "source": "https://www.nhs.uk/conditions/anaphylaxis/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-11",
+    "level": "emergency",
+    "title": "Self-harm or suicide statements",
+    "triggers": [
+      ["end", "life"],
+      ["end", "it", "all"],
+      ["hurt", "myself"],
+      ["suicide"]
+    ],
+    "keywords": ["want to end my life", "thinking of hurting myself", "want to end it all", "suicide"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "If you or someone is in immediate danger, call {emergencyNumber} now. You can also contact a local crisis line.",
+    "followUp": "Stay with the person and reach out to a trusted professional.",
+    "source": "https://www.nhs.uk/mental-health/feelings-symptoms-behaviours/behaviours/help-for-suicidal-thoughts/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-12",
+    "level": "contact_clinician",
+    "title": "Sudden new confusion",
+    "triggers": [
+      ["suddenly", "confused"],
+      ["doesn't", "recognize"],
+      ["new", "agitation"]
+    ],
+    "keywords": ["suddenly confused", "doesn't recognize me", "new agitation", "acute confusion"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Contact {clinician} today about this sudden change in confusion.",
+    "followUp": "Keep note of when the confusion began.",
+    "source": "https://www.nhs.uk/conditions/confusion/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-13",
+    "level": "contact_clinician",
+    "title": "Reading outside caregiver-set range",
+    "triggers": [
+      ["vital", "out", "range"]
+    ],
+    "keywords": ["blood pressure out of range", "glucose outside range"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Contact {clinician} today regarding readings outside the target range.",
+    "followUp": "Review trends before calling.",
+    "source": "https://www.nhs.uk/conditions/high-blood-pressure-hypertension/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-14",
+    "level": "contact_clinician",
+    "title": "Missed multiple doses",
+    "triggers": [
+      ["missed", "multiple", "doses"]
+    ],
+    "keywords": ["missed multiple doses", "two doses missed"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Contact {clinician} or pharmacist today regarding multiple missed doses.",
+    "followUp": "Do not give a double dose to make up for a missed one.",
+    "source": "https://www.nhs.uk/common-health-questions/medicines/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  },
+  {
+    "id": "RF-15",
+    "level": "contact_clinician",
+    "title": "Fever with other warning words",
+    "triggers": [
+      ["fever", "shivering"],
+      ["fever", "drinking"],
+      ["high", "fever"]
+    ],
+    "keywords": ["fever and shivering", "fever and not drinking", "high fever"],
+    "negation_tokens": ["no", "without", "not"],
+    "instruction": "Contact {clinician} today regarding this persistent fever.",
+    "followUp": "Ensure fluids are offered frequently.",
+    "source": "https://www.nhs.uk/conditions/fever-in-adults/",
+    "reviewedBy": "CareThread Safety Team",
+    "reviewedOn": "2026-10-10"
+  }
+]

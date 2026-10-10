@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { registry } from '../mcp/registry.js';
 import { db } from '../db/index.js';
 import { checkDoseGuard, MedicationInfo, MedEvent } from '../core/doseGuard.js';
@@ -57,7 +58,7 @@ registry.registerTool({
     } else {
       const circle = db.prepare(`SELECT * FROM care_circles WHERE id = ?`).get(ctx.circleId) as any;
       if (!circle) throw new Error('Circle not found');
-      const allergiesList = JSON.parse(circle.allergies_json);
+      const allergiesList = JSON.parse(circle.allergies_json || '[]');
       const allergiesText = allergiesList.length > 0 ? allergiesList.join(', ') : 'none';
       return {
         safetyLevel: 'none',
@@ -85,7 +86,7 @@ registry.registerTool({
   }),
   roles: ['primary'],
   handler: async (input, ctx) => {
-    const medId = 'med_' + Date.now() + Math.floor(Math.random()*1000); // Simple ID for MVP
+    const medId = 'med_' + randomUUID();
     
     // Check if it already exists to update or insert
     const existing = db.prepare(`SELECT id FROM medications WHERE circle_id = ? AND name = ? AND active = 1`).get(ctx.circleId, input.name) as { id: string } | undefined;
@@ -130,7 +131,7 @@ function findMedication(circleId: string, nameSearch: string): MedicationInfo[] 
   
   const matches = meds.filter(m => {
     if (m.name.toLowerCase().includes(searchLower)) return true;
-    const aliases = JSON.parse(m.aliases_json);
+    const aliases = JSON.parse(m.aliases_json || '[]');
     if (aliases.some((a: string) => a.toLowerCase().includes(searchLower))) return true;
     return false;
   });
@@ -227,7 +228,7 @@ registry.registerTool({
     }
 
     // Write it
-    const eventId = 'evt_' + Date.now() + Math.floor(Math.random()*1000);
+    const eventId = 'evt_' + randomUUID();
     const override = input.confirmRepeat ? 1 : 0;
     db.prepare(`
       INSERT INTO med_events (id, medication_id, member_id, status, event_at, logged_at, note, override_repeat, idempotency_key)
@@ -236,7 +237,7 @@ registry.registerTool({
 
     // Audit log
     db.prepare(`INSERT INTO audit_log (id, circle_id, member_id, tool, summary, at) VALUES (?, ?, ?, ?, ?, ?)`).run(
-      'aud_'+Date.now(), ctx.circleId, ctx.memberId, 'med_log_given', `med_log_given: dose ${override ? 'override' : 'logged'}`, ctx.now
+      'aud_' + randomUUID(), ctx.circleId, ctx.memberId, 'med_log_given', `med_log_given: dose ${override ? 'override' : 'logged'}`, ctx.now
     );
 
     const memberName = getMemberName(ctx.memberId);
@@ -260,19 +261,25 @@ registry.registerTool({
 // --- med_check_status ---
 registry.registerTool({
   name: 'med_check_status',
-  description: 'Answer "was it already given, by whom and when?"',
+  description: 'Answer "was it already given, by whom and when?" or summarize today\'s whole medication checklist',
+  annotations: {
+    readOnlyHint: true
+  },
   schema: z.object({
     medication: z.string().max(80).optional()
   }),
   roles: ['primary', 'family', 'aide', 'viewer'],
   handler: async (input, ctx) => {
+    const circle = db.prepare(`SELECT timezone FROM care_circles WHERE id = ?`).get(ctx.circleId) as { timezone?: string } | undefined;
+    const tz = circle?.timezone || 'UTC';
+    const todayStart = DateTime.fromISO(ctx.now).setZone(tz).startOf('day').toUTC().toISO()!;
+
     if (input.medication) {
       const medsFound = findMedication(ctx.circleId, input.medication);
       if (medsFound.length === 0) return { safetyLevel: 'none', safetyCode: null, spokenText: `I don't have a medication called ${input.medication}. Want me to add it?`, data: null };
       if (medsFound.length > 1) return { safetyLevel: 'none', safetyCode: null, spokenText: `Do you mean ${medsFound[0].name} or ${medsFound[1].name}?`, data: null };
       
       const med = medsFound[0];
-      const todayStart = DateTime.fromISO(ctx.now).setZone('Asia/Kolkata').startOf('day').toUTC().toISO();
       const lastEvent = db.prepare(`
         SELECT id, status, event_at, member_id FROM med_events 
         WHERE medication_id = ? AND event_at >= ?
@@ -284,7 +291,7 @@ registry.registerTool({
           safetyLevel: 'none',
           safetyCode: null,
           spokenText: `Nothing is logged for ${med.name} today.`,
-          data: { medication: med.name, state: 'nothing_logged' }
+          data: { medication: med.name, state: 'nothing_logged', lastEvent: null }
         };
       }
 
@@ -308,12 +315,50 @@ registry.registerTool({
         };
       }
     } else {
-      // Omit for checklist MVP simple behavior
+      // Whole checklist
+      const meds = db.prepare(`
+        SELECT id, name, times_json, as_needed 
+        FROM medications 
+        WHERE circle_id = ? AND active = 1 
+        ORDER BY name ASC
+      `).all(ctx.circleId) as Array<{ id: string; name: string; times_json: string; as_needed: number }>;
+
+      if (meds.length === 0) {
+        return {
+          safetyLevel: 'none',
+          safetyCode: null,
+          spokenText: 'No medications are currently configured for this care circle.',
+          data: { checklist: [] }
+        };
+      }
+
+      const checklistItems: Array<{ medication: string; state: string; time?: string }> = [];
+      const phrases: string[] = [];
+
+      for (const m of meds) {
+        const lastEvt = db.prepare(`
+          SELECT status, event_at, member_id 
+          FROM med_events 
+          WHERE medication_id = ? AND event_at >= ?
+          ORDER BY event_at DESC LIMIT 1
+        `).get(m.id, todayStart) as { status: string; event_at: string; member_id: string } | undefined;
+
+        if (lastEvt) {
+          const timeStr = DateTime.fromISO(lastEvt.event_at).setZone(tz).toFormat('h:mm a');
+          checklistItems.push({ medication: m.name, state: lastEvt.status, time: timeStr });
+          phrases.push(`${m.name} ${lastEvt.status} at ${timeStr}`);
+        } else {
+          checklistItems.push({ medication: m.name, state: 'nothing_logged' });
+          phrases.push(`${m.name} not logged yet`);
+        }
+      }
+
+      const spokenText = `Today: ${phrases.join(', ')}.`;
       return {
         safetyLevel: 'none',
         safetyCode: null,
-        spokenText: `Checking all medications is not fully implemented yet, but I can check specific ones.`,
-        data: null
+        spokenText,
+        data: { checklist: checklistItems }
       };
     }
   }

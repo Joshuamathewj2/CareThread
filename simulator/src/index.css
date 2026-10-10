@@ -18,6 +18,9 @@
 }
 
 body {
-  background-color: var(--color-slate-50);
-  color: var(--color-slate-800);
+  background-color: #0E1720;
+  color: #F8FAFC;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
 }

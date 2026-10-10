@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { db } from '../db/index.js';
 
 export interface AuthContext {
@@ -7,6 +8,8 @@ export interface AuthContext {
   role: 'primary' | 'family' | 'aide' | 'viewer';
   now: string; // Injectable server clock
 }
+
+export const authContextStorage = new AsyncLocalStorage<AuthContext>();
 
 declare global {
   namespace Express {

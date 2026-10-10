@@ -1,7 +1,8 @@
-import { db } from './index.js';
+import { db as defaultDb } from './index.js';
 import { DateTime } from 'luxon';
 
-export function seedDemo() {
+export function seedDemo(targetDb?: any) {
+  const db = targetDb || defaultDb;
   const now = DateTime.now().toUTC();
   
   db.exec(`
@@ -38,7 +39,7 @@ export function seedDemo() {
     0, 
     JSON.stringify([{ name: 'Dr. Rao', role: 'family doctor', phone: '000-000-0000' }]),
     JSON.stringify({
-      bp: { min: 100, max: 150, unit: 'mmHg' }, // Assuming min/max logic
+      bp: { min: 100, max: 150, unit: 'mmHg' },
       glucose: { min: 70, max: 180, unit: 'mg/dL' }
     }),
     now.toISO()

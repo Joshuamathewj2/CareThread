@@ -5,9 +5,8 @@ import {
   Tool 
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { AuthContext } from '../middleware/auth.js';
-import { authContextStorage } from '../index.js';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { AuthContext, authContextStorage } from '../middleware/auth.js';
+import { filterSpokenOutput } from '../core/outputGuard.js';
 
 export type ToolHandler<T> = (input: T, ctx: AuthContext) => Promise<{
   safetyLevel: 'none' | 'caution' | 'error' | 'redflag';
@@ -29,7 +28,7 @@ export interface ToolDefinition<T> {
 }
 
 export class ToolRegistry {
-  private tools = new Map<string, ToolDefinition<any>>();
+  public tools = new Map<string, ToolDefinition<any>>();
 
   registerTool<T>(def: ToolDefinition<T>) {
     this.tools.set(def.name, def);
@@ -38,16 +37,27 @@ export class ToolRegistry {
   attachToServer(server: Server) {
     server.setRequestHandler(ListToolsRequestSchema, async () => {
       const toolList: Tool[] = Array.from(this.tools.values()).map(t => {
-        return {
+        // Use Zod 4's native toJSONSchema
+        const jsonSchema = (z as any).toJSONSchema 
+          ? (z as any).toJSONSchema(t.schema) 
+          : { type: 'object', properties: {} };
+
+        const tool: Tool = {
           name: t.name,
           description: t.description,
-          inputSchema: zodToJsonSchema(t.schema as any) as any
+          inputSchema: jsonSchema as any
         };
+
+        if (t.annotations) {
+          (tool as any).annotations = t.annotations;
+        }
+
+        return tool;
       });
       return { tools: toolList };
     });
 
-    server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const ctx = authContextStorage.getStore();
       
       if (!ctx) {
@@ -80,21 +90,55 @@ export class ToolRegistry {
       }
 
       try {
-        const input = def.schema.parse(request.params.arguments);
+        const input = def.schema.parse(request.params.arguments || {});
         const result = await def.handler(input, ctx);
         
+        // Pass spoken output through Output Guard
+        const guardResult = filterSpokenOutput(result.spokenText);
+        const finalSpokenText = guardResult.text;
+
         return {
-          content: [{ type: 'text', text: result.spokenText }],
+          content: [{ type: 'text', text: finalSpokenText }],
           structuredContent: {
             ok: true,
             tool: def.name,
-            safety: { level: result.safetyLevel, code: result.safetyCode },
+            safety: { 
+              level: guardResult.blocked && guardResult.category !== 'absence_certainty' ? 'caution' : result.safetyLevel, 
+              code: guardResult.blocked && guardResult.category !== 'absence_certainty' ? 'OUTPUT_GUARD_BLOCKED' : result.safetyCode 
+            },
             data: result.data,
             attribution: { memberId: ctx.memberId },
             at: ctx.now
           }
         } as any;
       } catch (err: any) {
+        if (err instanceof z.ZodError) {
+          const firstIssue = err.issues[0];
+          let spoken = "That input looks off. Say it again?";
+          let code = "INVALID_VALUE";
+
+          if (firstIssue) {
+            const pathStr = firstIssue.path.join('.');
+            if (pathStr.includes('time') || pathStr.includes('at') || pathStr.includes('minutes')) {
+              spoken = "I couldn't use that time. Tell me how long ago it was.";
+              code = "INVALID_TIME";
+            } else if (firstIssue.code === 'too_small' || firstIssue.code === 'too_big') {
+              spoken = "That number looks off. Say it again?";
+              code = "INVALID_VALUE";
+            }
+          }
+
+          return {
+            content: [{ type: 'text', text: spoken }],
+            isError: true,
+            structuredContent: {
+              ok: false,
+              tool: def.name,
+              error: { code, message: spoken, details: err.issues }
+            }
+          } as any;
+        }
+
         return {
           content: [{ type: 'text', text: "Something went wrong and I did not save that. Please try again." }],
           isError: true,
