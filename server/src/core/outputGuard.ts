@@ -41,9 +41,18 @@ export interface SpokenGuardResult {
   category?: 'reassurance' | 'diagnosis' | 'dosing_advice' | 'absence_certainty';
 }
 
-export function filterSpokenOutput(text: string, emergencyNumber: string = '112'): SpokenGuardResult {
+/**
+ * @param quotedUserText Verbatim caregiver words the response reads back (e.g. a saved doctor question).
+ *   They are excluded from the advice checks, since repeating "should we skip the dose?" is not advice.
+ */
+export function filterSpokenOutput(text: string, emergencyNumber: string = '112', quotedUserText: string[] = []): SpokenGuardResult {
+  let checked = text;
+  for (const quote of quotedUserText) {
+    if (quote) checked = checked.split(quote).join(' ');
+  }
+
   for (const pattern of FORBIDDEN_REASSURANCE_PATTERNS) {
-    if (pattern.test(text)) {
+    if (pattern.test(checked)) {
       return {
         blocked: true,
         category: 'reassurance',
@@ -53,7 +62,7 @@ export function filterSpokenOutput(text: string, emergencyNumber: string = '112'
   }
 
   for (const pattern of FORBIDDEN_DIAGNOSIS_PATTERNS) {
-    if (pattern.test(text)) {
+    if (pattern.test(checked)) {
       return {
         blocked: true,
         category: 'diagnosis',
@@ -63,7 +72,7 @@ export function filterSpokenOutput(text: string, emergencyNumber: string = '112'
   }
 
   for (const pattern of FORBIDDEN_DOSING_ADVICE_PATTERNS) {
-    if (pattern.test(text)) {
+    if (pattern.test(checked)) {
       return {
         blocked: true,
         category: 'dosing_advice',
@@ -73,7 +82,7 @@ export function filterSpokenOutput(text: string, emergencyNumber: string = '112'
   }
 
   for (const pattern of FORBIDDEN_ABSENCE_PATTERNS) {
-    if (pattern.test(text)) {
+    if (pattern.test(checked)) {
       // Substitute safe "not logged" phrasing
       return {
         blocked: true,

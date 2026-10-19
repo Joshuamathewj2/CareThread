@@ -3,17 +3,19 @@ import { randomUUID } from 'node:crypto';
 import { registry } from '../mcp/registry.js';
 import { db } from '../db/index.js';
 import { DateTime } from 'luxon';
+import { writeAudit } from './shared.js';
+
+const isoDate = z.string().refine(v => DateTime.fromISO(v).isValid, 'Expected an ISO 8601 date');
 
 // --- handoff_summary ---
 registry.registerTool({
   name: 'handoff_summary',
-  description: 'Generate a short structured summary of a time window for the next caregiver',
-  annotations: {
-    readOnlyHint: true
-  },
+  title: 'Shift handoff',
+  description: 'Spoken handoff for the next caregiver: red flags first, then doses and anything not logged, then notes',
+  annotations: { readOnlyHint: true, idempotentHint: true },
   schema: z.object({
-    window: z.enum(['last_shift', 'today', 'last_24h']).default('last_shift').optional(),
-    hours: z.number().int().min(1).max(72).optional()
+    window: z.enum(['last_shift', 'today', 'last_24h']).default('last_shift').optional().describe('last_shift is the past 8 hours'),
+    hours: z.number().int().min(1).max(72).optional().describe('Custom window; overrides window')
   }),
   roles: ['primary', 'family', 'aide', 'viewer'],
   handler: async (input, ctx) => {
@@ -87,12 +89,12 @@ registry.registerTool({
     } else {
       const parts: string[] = [];
       if (redflags.length > 0) {
-        parts.push(`Caution: ${redflags.length} red-flag alert noted recently.`);
+        parts.push(`Caution: ${redflags.length} red-flag alert${redflags.length > 1 ? 's' : ''} noted recently.`);
       }
 
       const dosesGiven = doses.filter(d => d.status === 'given');
       if (dosesGiven.length > 0) {
-        parts.push(`${dosesGiven.length} doses logged given.`);
+        parts.push(`${dosesGiven.length} dose${dosesGiven.length > 1 ? 's' : ''} logged as given${unloggedMeds.length > 0 ? `; ${unloggedMeds.slice(0, 2).join(' and ')} not logged yet` : ''}.`);
       } else if (unloggedMeds.length > 0) {
         parts.push(`${unloggedMeds.slice(0, 2).join(' and ')} not logged yet.`);
       }
@@ -100,7 +102,7 @@ registry.registerTool({
       if (obs.length > 0) {
         parts.push(`${obs.length} observation note${obs.length > 1 ? 's' : ''} recorded.`);
       } else if (openQuestions?.count > 0) {
-        parts.push(`${openQuestions.count} question saved for the doctor.`);
+        parts.push(`${openQuestions.count} question${openQuestions.count > 1 ? 's' : ''} saved for the doctor.`);
       }
 
       spokenText = parts.length > 0 ? parts.join(' ') : `Handoff summary: all quiet in the last window.`;
@@ -125,15 +127,14 @@ registry.registerTool({
 // --- visit_export ---
 registry.registerTool({
   name: 'visit_export',
-  description: 'Generate a structured Markdown clinical visit report for the doctor or health team',
-  annotations: {
-    readOnlyHint: true
-  },
+  title: 'Doctor visit report',
+  description: 'Generate a Markdown visit report (medications, doses, vitals, notes, red flags, questions) for the clinician',
+  annotations: { readOnlyHint: true, idempotentHint: true },
   schema: z.object({
-    fromDate: z.string().optional(),
-    toDate: z.string().optional(),
+    fromDate: isoDate.optional(),
+    toDate: isoDate.optional(),
     daysBack: z.number().int().min(1).max(30).default(14).optional(),
-    appointmentDate: z.string().optional()
+    appointmentDate: isoDate.optional()
   }),
   roles: ['primary', 'family'],
   handler: async (input, ctx) => {
@@ -274,10 +275,7 @@ registry.registerTool({
       md += `\n`;
     }
 
-    // Audit log
-    db.prepare(`INSERT INTO audit_log (id, circle_id, member_id, tool, summary, at) VALUES (?, ?, ?, ?, ?, ?)`).run(
-      'aud_' + randomUUID(), ctx.circleId, ctx.memberId, 'visit_export', `visit_export: generated markdown report`, ctx.now
-    );
+    writeAudit(ctx.circleId, ctx.memberId, 'visit_export', 'visit_export: generated markdown report', ctx.now);
 
     return {
       safetyLevel: 'none',

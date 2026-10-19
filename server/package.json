@@ -1,26 +1,29 @@
 {
   "name": "server",
-  "version": "1.0.0",
-  "description": "",
+  "version": "1.1.0",
+  "description": "CareThread: self-hosted MCP server (Streamable HTTP, spec 2025-11-25) that turns Alexa+ into a shared family care log",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
-    "test:safety": "vitest run test/doseGuard.test.ts",
+    "test:safety": "vitest run test/doseGuard.test.ts test/redFlagEngine.test.ts test/outputGuard.test.ts",
     "seed:demo": "tsx src/db/seed.ts",
-    "inspector": "npx @modelcontextprotocol/inspector node dist/index.js"
+    "inspector": "npx @modelcontextprotocol/inspector"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1152.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "better-sqlite3": "^13.0.3",
     "express": "^5.3.0",
     "luxon": "^3.7.2",
-    "zod": "^4.6.5",
-    "zod-to-json-schema": "^3.25.2"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
@@ -30,5 +33,8 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

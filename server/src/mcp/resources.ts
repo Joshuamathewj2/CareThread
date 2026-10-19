@@ -1,15 +1,29 @@
-import { ListResourcesRequestSchema, ReadResourceRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+  McpError,
+  ErrorCode
+} from '@modelcontextprotocol/sdk/types.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { db } from '../db/index.js';
 import { DateTime } from 'luxon';
+import { resolveAuthContext } from '../middleware/auth.js';
+
+// MCP's reserved code for an unknown resource URI
+const RESOURCE_NOT_FOUND = -32002;
 
 export function attachResourcesAndPrompts(server: Server) {
   // --- Resources ---
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  server.setRequestHandler(ListResourcesRequestSchema, async (_request, extra) => {
+    const ctx = resolveAuthContext(extra);
+    if (!ctx) throw new McpError(ErrorCode.InvalidRequest, 'No care circle for this caller');
     return {
       resources: [
         {
-          uri: 'carethread://circle/c_1/log/today',
+          uri: `carethread://circle/${ctx.circleId}/log/today`,
           name: "Today's Care Timeline",
           description: "Today's live caregiver activity timeline as structured JSON",
           mimeType: 'application/json'
@@ -30,13 +44,29 @@ export function attachResourcesAndPrompts(server: Server) {
     };
   });
 
-  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    resourceTemplates: [
+      {
+        uriTemplate: 'carethread://circle/{circleId}/log/today',
+        name: "Today's Care Timeline",
+        description: "A circle's activity timeline for today (only the caller's own circle is readable)",
+        mimeType: 'application/json'
+      }
+    ]
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
     const uri = request.params.uri;
+    const ctx = resolveAuthContext(extra);
+    if (!ctx) throw new McpError(ErrorCode.InvalidRequest, 'No care circle for this caller');
 
     // Today's timeline for circle
     if (uri.startsWith('carethread://circle/') && uri.endsWith('/log/today')) {
-      const parts = uri.replace('carethread://circle/', '').split('/');
-      const circleId = parts[0] || 'c_1';
+      const circleId = uri.replace('carethread://circle/', '').split('/')[0];
+      if (circleId !== ctx.circleId) {
+        // Same answer as a missing circle, so other circle ids can't be probed
+        throw new McpError(RESOURCE_NOT_FOUND, `Resource not found: ${uri}`);
+      }
       const circle = db.prepare(`SELECT timezone FROM care_circles WHERE id = ?`).get(circleId) as { timezone?: string } | undefined;
       const tz = circle?.timezone || 'UTC';
       const startOfDay = DateTime.now().setZone(tz).startOf('day').toUTC().toISO()!;
@@ -67,7 +97,15 @@ export function attachResourcesAndPrompts(server: Server) {
         ORDER BY v.recorded_at DESC
       `).all(circleId, startOfDay);
 
-      const timeline = [...doses, ...obs, ...vitals].sort((a: any, b: any) => 
+      const redflags = db.prepare(`
+        SELECT r.id, 'redflag' as type, r.level, r.at, r.rule_id as title, mem.display_name as member
+        FROM redflag_events r
+        JOIN members mem ON r.member_id = mem.id
+        WHERE r.circle_id = ? AND r.at >= ?
+        ORDER BY r.at DESC
+      `).all(circleId, startOfDay);
+
+      const timeline = [...doses, ...obs, ...vitals, ...redflags].sort((a: any, b: any) => 
         new Date(b.at).getTime() - new Date(a.at).getTime()
       );
 
@@ -81,7 +119,7 @@ export function attachResourcesAndPrompts(server: Server) {
     }
 
     if (uri === 'carethread://current-medications') {
-      const meds = db.prepare(`SELECT * FROM medications WHERE active = 1`).all();
+      const meds = db.prepare(`SELECT * FROM medications WHERE circle_id = ? AND active = 1`).all(ctx.circleId);
       return {
         contents: [{
           uri,
@@ -93,7 +131,7 @@ export function attachResourcesAndPrompts(server: Server) {
     
     if (uri === 'carethread://active-redflags') {
       const since = new Date(Date.now() - 24 * 3600000).toISOString();
-      const rf = db.prepare(`SELECT * FROM redflag_events WHERE at >= ?`).all(since);
+      const rf = db.prepare(`SELECT * FROM redflag_events WHERE circle_id = ? AND at >= ?`).all(ctx.circleId, since);
       return {
         contents: [{
           uri,
@@ -103,7 +141,7 @@ export function attachResourcesAndPrompts(server: Server) {
       };
     }
 
-    throw new Error(`Resource not found: ${uri}`);
+    throw new McpError(RESOURCE_NOT_FOUND, `Resource not found: ${uri}`);
   });
 
   // --- Prompts ---
@@ -175,6 +213,6 @@ export function attachResourcesAndPrompts(server: Server) {
       };
     }
 
-    throw new Error(`Prompt not found: ${request.params.name}`);
+    throw new McpError(ErrorCode.InvalidParams, `Prompt not found: ${request.params.name}`);
   });
 }

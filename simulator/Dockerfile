@@ -1,4 +1,4 @@
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
@@ -9,7 +9,7 @@ RUN npm run build
 
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
-# Setup basic nginx config for SPA and proxy /mcp to server:3001
+# SPA plus a same-origin proxy to the MCP server. Buffering is off so Streamable HTTP's SSE responses stream.
 RUN echo 'server { \
   listen 80; \
   location / { \
@@ -20,6 +20,10 @@ RUN echo 'server { \
     proxy_pass http://server:3001; \
     proxy_http_version 1.1; \
     proxy_set_header Connection ""; \
+    proxy_set_header Host $host; \
+    proxy_buffering off; \
+    proxy_cache off; \
+    proxy_read_timeout 1h; \
   } \
 }' > /etc/nginx/conf.d/default.conf
 

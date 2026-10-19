@@ -2,17 +2,23 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { registry } from '../mcp/registry.js';
 import { db } from '../db/index.js';
-import { checkDoseGuard, MedicationInfo, MedEvent } from '../core/doseGuard.js';
-import { DateTime } from 'luxon';
+import { checkDoseGuard, MedEvent } from '../core/doseGuard.js';
+import { DateTime, IANAZone } from 'luxon';
+import { findMedication, formatRelativeTime, getMemberName, writeAudit } from './shared.js';
+
+const isoDateTime = z.string().refine(v => DateTime.fromISO(v, { setZone: true }).isValid, 'Expected an ISO 8601 date-time');
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Expected HH:mm (24-hour)');
 
 // --- recipient_profile ---
 registry.registerTool({
   name: 'recipient_profile',
-  description: 'Set or read the care recipient\'s basics',
+  title: 'Care recipient profile',
+  description: 'Read the care recipient\'s basics (name, allergies, emergency number), or update them (primary caregiver only)',
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   schema: z.object({
     action: z.enum(['get', 'set']),
     recipientName: z.string().max(80).optional(),
-    timezone: z.string().optional(),
+    timezone: z.string().refine(tz => IANAZone.isValidZone(tz), 'Expected an IANA timezone like Asia/Kolkata').optional(),
     allergies: z.array(z.string().max(80)).max(20).optional(),
     clinicians: z.array(z.object({
       name: z.string().max(80),
@@ -73,15 +79,17 @@ registry.registerTool({
 // --- med_schedule_set ---
 registry.registerTool({
   name: 'med_schedule_set',
-  description: 'Add or update a medication as entered by the caregiver',
+  title: 'Add or update a medication',
+  description: 'Add or update a medication exactly as the caregiver states it. Never suggest doses or intervals',
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   schema: z.object({
-    name: z.string().max(80),
-    aliases: z.array(z.string().max(80)).optional(),
-    doseText: z.string().max(100).optional(),
-    times: z.array(z.string().max(5)).optional(), // HH:mm
+    name: z.string().min(1).max(80),
+    aliases: z.array(z.string().max(80)).optional().describe('Other names the family uses, e.g. "sugar tablet"'),
+    doseText: z.string().max(100).optional().describe('Dose as said by the caregiver, e.g. "500 mg tablet"'),
+    times: z.array(hhmm).max(12).optional().describe('Scheduled local times, 24-hour HH:mm'),
     asNeeded: z.boolean().optional().default(false),
-    minIntervalMinutes: z.number().min(15).max(1440).optional().nullable(),
-    maxPerDay: z.number().min(1).max(24).optional().nullable(),
+    minIntervalMinutes: z.number().int().min(15).max(1440).optional().nullable().describe('Minimum gap between doses; powers the double-dose warning'),
+    maxPerDay: z.number().int().min(1).max(24).optional().nullable(),
     note: z.string().max(500).optional()
   }),
   roles: ['primary'],
@@ -89,7 +97,7 @@ registry.registerTool({
     const medId = 'med_' + randomUUID();
     
     // Check if it already exists to update or insert
-    const existing = db.prepare(`SELECT id FROM medications WHERE circle_id = ? AND name = ? AND active = 1`).get(ctx.circleId, input.name) as { id: string } | undefined;
+    const existing = db.prepare(`SELECT id FROM medications WHERE circle_id = ? AND lower(name) = lower(?) AND active = 1`).get(ctx.circleId, input.name) as { id: string } | undefined;
     
     if (existing) {
       db.prepare(`
@@ -124,53 +132,20 @@ registry.registerTool({
   }
 });
 
-// Helper for fuzzy match (simplified)
-function findMedication(circleId: string, nameSearch: string): MedicationInfo[] {
-  const meds = db.prepare(`SELECT id, name, aliases_json, min_interval_minutes, max_per_day, as_needed, active FROM medications WHERE circle_id = ?`).all(circleId) as any[];
-  const searchLower = nameSearch.toLowerCase();
-  
-  const matches = meds.filter(m => {
-    if (m.name.toLowerCase().includes(searchLower)) return true;
-    const aliases = JSON.parse(m.aliases_json || '[]');
-    if (aliases.some((a: string) => a.toLowerCase().includes(searchLower))) return true;
-    return false;
-  });
-
-  return matches.map(m => ({
-    id: m.id,
-    name: m.name,
-    active: m.active === 1,
-    minIntervalMinutes: m.min_interval_minutes,
-    maxPerDay: m.max_per_day,
-    asNeeded: m.as_needed === 1
-  }));
-}
-
-function getMemberName(memberId: string): string {
-  const m = db.prepare(`SELECT display_name FROM members WHERE id = ?`).get(memberId) as { display_name: string } | undefined;
-  return m ? m.display_name : 'Someone';
-}
-
-function formatRelativeTime(isoString: string, nowIso: string): string {
-  const dt = DateTime.fromISO(isoString);
-  const diff = Math.floor(Math.abs(DateTime.fromISO(nowIso).diff(dt, 'minutes').minutes));
-  if (diff < 60) return `${diff} minutes ago`;
-  const hours = Math.round(diff / 60);
-  return `about ${hours} hour${hours > 1 ? 's' : ''} ago`;
-}
-
 // --- med_log_given ---
 registry.registerTool({
   name: 'med_log_given',
-  description: 'Record a dose as given, skipped or refused, attributed to the speaker',
+  title: 'Log a medication dose',
+  description: 'Record a dose as given, skipped or refused, attributed to the speaker. Warns before a possible double dose',
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   schema: z.object({
-    medication: z.string().max(80),
+    medication: z.string().min(1).max(80).describe('Medication name or family alias as spoken'),
     status: z.enum(['given', 'skipped', 'refused']).default('given'),
-    at: z.string().optional(),
-    minutesAgo: z.number().min(0).max(1440).optional(),
+    at: isoDateTime.optional().describe('When it happened, ISO 8601 with offset. Prefer minutesAgo for spoken times'),
+    minutesAgo: z.number().int().min(0).max(1440).optional().describe('How long ago it happened, e.g. 30 for "half an hour ago"'),
     note: z.string().max(500).optional(),
-    confirmRepeat: z.boolean().default(false),
-    idempotencyKey: z.string().max(100).optional()
+    confirmRepeat: z.boolean().default(false).describe('Only true after the caregiver explicitly confirmed a repeat-dose warning'),
+    idempotencyKey: z.string().max(100).optional().describe('Stable key per utterance so retries never double-log')
   }),
   roles: ['primary', 'family', 'aide'],
   handler: async (input, ctx) => {
@@ -195,10 +170,24 @@ registry.registerTool({
 
     const medsFound = findMedication(ctx.circleId, input.medication);
     if (medsFound.length === 0) {
-      return { safetyLevel: 'error', safetyCode: 'MEDICATION_NOT_FOUND', spokenText: `I don't have a medication called ${input.medication}. Want me to add it?`, data: null };
+      return {
+        safetyLevel: 'error',
+        safetyCode: 'MEDICATION_NOT_FOUND',
+        spokenText: `I don't have a medication called ${input.medication}. Want me to add it?`,
+        data: null,
+        followUp: ctx.role === 'primary'
+          ? { kind: 'confirm', prompt: `Add ${input.medication} to the medication list?`, tool: 'med_schedule_set', arguments: { name: input.medication } }
+          : { kind: 'clarify', prompt: 'Only the primary caregiver can add medications. Which medication did you mean?' }
+      };
     }
     if (medsFound.length > 1) {
-      return { safetyLevel: 'error', safetyCode: 'AMBIGUOUS_MEDICATION', spokenText: `Do you mean ${medsFound[0].name} or ${medsFound[1].name}?`, data: null };
+      return {
+        safetyLevel: 'error',
+        safetyCode: 'AMBIGUOUS_MEDICATION',
+        spokenText: `Do you mean ${medsFound[0].name} or ${medsFound[1].name}?`,
+        data: null,
+        followUp: { kind: 'choose', prompt: 'Which medication?', tool: 'med_log_given', arguments: { ...input, medication: '{choice}' }, choices: medsFound.map(m => m.name) }
+      };
     }
 
     const med = medsFound[0];
@@ -214,6 +203,15 @@ registry.registerTool({
 
     if (input.status === 'given') {
       const guard = checkDoseGuard([med], history, eventTimeIso, ctx.memberId, ctx.now);
+
+      if (guard.code === 'INVALID_TIME') {
+        return {
+          safetyLevel: 'error',
+          safetyCode: 'INVALID_TIME',
+          spokenText: "That time is in the future, so I didn't log it. Tell me how long ago it was.",
+          data: { guard }
+        };
+      }
       
       if (guard.level === 'caution' && !input.confirmRepeat) {
         const who = guard.lastMember ? getMemberName(guard.lastMember) : 'someone';
@@ -222,7 +220,14 @@ registry.registerTool({
           safetyLevel: 'caution',
           safetyCode: guard.code,
           spokenText: `Careful, ${who} logged ${med.name} ${when}. Do you want to log another dose anyway?`,
-          data: { guard }
+          data: { guard },
+          followUp: {
+            kind: 'confirm',
+            prompt: 'Log another dose anyway?',
+            tool: 'med_log_given',
+            // Pin the time so a confirmation a minute later records the dose the caregiver described
+            arguments: { medication: med.name, status: input.status, at: eventTimeIso, note: input.note, confirmRepeat: true, idempotencyKey: input.idempotencyKey }
+          }
         };
       }
     }
@@ -235,10 +240,7 @@ registry.registerTool({
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(eventId, med.id, ctx.memberId, input.status, eventTimeIso, ctx.now, input.note || null, override, input.idempotencyKey || null);
 
-    // Audit log
-    db.prepare(`INSERT INTO audit_log (id, circle_id, member_id, tool, summary, at) VALUES (?, ?, ?, ?, ?, ?)`).run(
-      'aud_' + randomUUID(), ctx.circleId, ctx.memberId, 'med_log_given', `med_log_given: dose ${override ? 'override' : 'logged'}`, ctx.now
-    );
+    writeAudit(ctx.circleId, ctx.memberId, 'med_log_given', `med_log_given: dose ${override ? 'override' : 'logged'}`, ctx.now);
 
     const memberName = getMemberName(ctx.memberId);
     let spokenText = `Logged: ${med.name}, ${formatRelativeTime(eventTimeIso, ctx.now)}, by ${memberName}.`;
@@ -261,12 +263,11 @@ registry.registerTool({
 // --- med_check_status ---
 registry.registerTool({
   name: 'med_check_status',
-  description: 'Answer "was it already given, by whom and when?" or summarize today\'s whole medication checklist',
-  annotations: {
-    readOnlyHint: true
-  },
+  title: 'Check medication status',
+  description: 'Answer "was it already given, by whom and when?" or, with no medication, read today\'s whole checklist',
+  annotations: { readOnlyHint: true, idempotentHint: true },
   schema: z.object({
-    medication: z.string().max(80).optional()
+    medication: z.string().max(80).optional().describe('Omit to get the full checklist for today')
   }),
   roles: ['primary', 'family', 'aide', 'viewer'],
   handler: async (input, ctx) => {
@@ -277,7 +278,15 @@ registry.registerTool({
     if (input.medication) {
       const medsFound = findMedication(ctx.circleId, input.medication);
       if (medsFound.length === 0) return { safetyLevel: 'none', safetyCode: null, spokenText: `I don't have a medication called ${input.medication}. Want me to add it?`, data: null };
-      if (medsFound.length > 1) return { safetyLevel: 'none', safetyCode: null, spokenText: `Do you mean ${medsFound[0].name} or ${medsFound[1].name}?`, data: null };
+      if (medsFound.length > 1) {
+        return {
+          safetyLevel: 'none',
+          safetyCode: null,
+          spokenText: `Do you mean ${medsFound[0].name} or ${medsFound[1].name}?`,
+          data: null,
+          followUp: { kind: 'choose', prompt: 'Which medication?', tool: 'med_check_status', arguments: { medication: '{choice}' }, choices: medsFound.map(m => m.name) }
+        };
+      }
       
       const med = medsFound[0];
       const lastEvent = db.prepare(`

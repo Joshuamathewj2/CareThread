@@ -1,9 +1,71 @@
 import { mcpClient } from './mcpClient';
 
-// Smart rule-based voice agent routing caregiver natural speech to MCP tools
-export async function handleUserVoice(text: string, memberId: string): Promise<string> {
+export type AgentReply = { text: string; safety?: { level: string; code: string | null } };
+
+type FollowUp = { kind: 'confirm' | 'choose' | 'clarify'; prompt: string; tool?: string; arguments?: Record<string, unknown>; choices?: string[] };
+
+// The server's followUp contract: a pending confirmation or choice carries the exact next tool call.
+let pendingFollowUp: FollowUp | null = null;
+let pendingFor: string | null = null;
+
+async function run(name: string, args: Record<string, unknown>): Promise<AgentReply> {
+  const result: any = await mcpClient.callTool(name, args);
+  const sc = result.structuredContent;
+  pendingFollowUp = sc?.followUp?.tool ? sc.followUp : null;
+  return { text: result.content?.[0]?.text ?? '', safety: sc?.safety };
+}
+
+const YES = /\b(yes|yeah|yep|sure|confirm|do it|go ahead|anyway|correct)\b/;
+const NO = /\b(no|nope|cancel|don't|do not|stop)\b/;
+
+async function resolveFollowUp(lower: string): Promise<AgentReply | null> {
+  const followUp = pendingFollowUp;
+  if (!followUp?.tool) return null;
+
+  if (followUp.kind === 'choose' && followUp.choices) {
+    const choice = followUp.choices.find(c => lower.includes(c.toLowerCase()));
+    if (!choice) return null;
+    const args = Object.fromEntries(Object.entries(followUp.arguments ?? {}).map(([k, v]) => [k, v === '{choice}' ? choice : v]));
+    return run(followUp.tool, args);
+  }
+
+  if (followUp.kind === 'confirm') {
+    if (YES.test(lower)) return run(followUp.tool, followUp.arguments ?? {});
+    if (NO.test(lower)) {
+      pendingFollowUp = null;
+      return { text: "Okay, I left the log as it is." };
+    }
+  }
+  return null;
+}
+
+// Rule-based stand-in for the Alexa+ agent, routing caregiver speech to MCP tools
+export async function handleUserVoice(text: string, memberId: string): Promise<AgentReply> {
   await mcpClient.connect(memberId);
+  // A confirmation belongs to the caregiver who was asked
+  if (pendingFor !== memberId) pendingFollowUp = null;
+  pendingFor = memberId;
   const lower = text.toLowerCase();
+
+  // 0. Answer to a pending confirmation or choice from the previous turn
+  const followed = await resolveFollowUp(lower);
+  if (followed) return followed;
+  pendingFollowUp = null;
+
+  // Undo a misheard entry (preview first; the server asks for confirmation)
+  if (/\b(undo|scratch that|delete that|remove that|that's wrong)\b/.test(lower)) {
+    return run('undo_last_entry', {});
+  }
+
+  // What needs doing now
+  if (/(what('s| is) (next|due)|what does (he|she|dad|mom) need|anything due|what needs doing)/.test(lower)) {
+    return run('care_next_actions', {});
+  }
+
+  // Free-form questions about the past go to ask_care_log (Amazon Bedrock when enabled)
+  if (/^(when did|when was|how many times|how often|has (he|she|dad|mom) been|what did .* (eat|say)|ask the log)/.test(lower)) {
+    return run('ask_care_log', { question: text });
+  }
 
   // 1. Red-Flag Symptom Evaluation (Stateless Escalation)
   const redFlagKeywords = [
@@ -13,10 +75,9 @@ export async function handleUserVoice(text: string, memberId: string): Promise<s
     'fever', 'shivering', 'bleeding'
   ];
   if (redFlagKeywords.some(k => lower.includes(k)) && (lower.includes('is this') || lower.includes('worry') || lower.includes('serious') || lower.includes('notice') || lower.includes('started'))) {
-    const res = await mcpClient.callTool('redflag_check', {
+    return run('redflag_check', {
       description: text
     });
-    return (res.content as any)[0].text;
   }
 
   // 2. Medication Administration Logging
@@ -27,15 +88,12 @@ export async function handleUserVoice(text: string, memberId: string): Promise<s
     if (lower.includes('vitamin d')) med = 'Vitamin D';
     if (lower.includes('paracetamol')) med = 'Paracetamol';
 
-    const confirm = lower.includes('anyway') || lower.includes('actually') || lower.includes('yes') || lower.includes('override');
     const status = lower.includes('skipped') ? 'skipped' : lower.includes('refused') ? 'refused' : 'given';
 
-    const result = await mcpClient.callTool('med_log_given', {
+    return run('med_log_given', {
       medication: med,
-      status,
-      confirmRepeat: confirm
+      status
     });
-    return (result.content as any)[0].text;
   }
 
   // 3. Medication Status Check (Single drug or entire checklist)
@@ -45,8 +103,7 @@ export async function handleUserVoice(text: string, memberId: string): Promise<s
     if (lower.includes('amlodipine')) med = 'Amlodipine';
     if (lower.includes('atorvastatin')) med = 'Atorvastatin';
 
-    const result = await mcpClient.callTool('med_check_status', med ? { medication: med } : {});
-    return (result.content as any)[0].text;
+    return run('med_check_status', med ? { medication: med } : {});
   }
 
   // 4. Vital Signs Logging
@@ -55,98 +112,86 @@ export async function handleUserVoice(text: string, memberId: string): Promise<s
       const match = text.match(/(\d{2,3})\s*(?:over|\/)\s*(\d{2,3})/);
       const sys = match ? parseInt(match[1]) : 120;
       const dia = match ? parseInt(match[2]) : 80;
-      const res = await mcpClient.callTool('log_vital', {
+      return run('log_vital', {
         kind: 'bp',
         value: sys,
         value2: dia,
         unit: 'mmHg'
       });
-      return (res.content as any)[0].text;
     }
 
     if (lower.includes('glucose') || lower.includes('sugar')) {
       const match = text.match(/(\d{2,3})/);
       const val = match ? parseInt(match[1]) : 110;
-      const res = await mcpClient.callTool('log_vital', {
+      return run('log_vital', {
         kind: 'glucose',
         value: val,
         unit: 'mg/dL'
       });
-      return (res.content as any)[0].text;
     }
 
     if (lower.includes('temp')) {
       const match = text.match(/(\d{2,3}(?:\.\d)?)/);
       const val = match ? parseFloat(match[1]) : 37;
-      const res = await mcpClient.callTool('log_vital', {
+      return run('log_vital', {
         kind: 'temperature',
         value: val,
         unit: 'C'
       });
-      return (res.content as any)[0].text;
     }
   }
 
   // 5. Questions for the Doctor
   if (lower.includes('ask doctor') || lower.includes('ask the doctor') || lower.includes('question for doctor') || lower.includes('doctor list')) {
     if (lower.includes('list') || lower.includes('what are') || lower.includes('show')) {
-      const res = await mcpClient.callTool('question_for_doctor', { action: 'list' });
-      return (res.content as any)[0].text;
+      return run('question_for_doctor', { action: 'list' });
     }
     const cleanText = text.replace(/^(please\s+)?(ask\s+(the\s+)?doctor|save\s+(a\s+)?question\s+for\s+(the\s+)?doctor)\s*(about|that|:)?/i, '').trim();
-    const res = await mcpClient.callTool('question_for_doctor', {
+    return run('question_for_doctor', {
       action: 'add',
       text: cleanText || text
     });
-    return (res.content as any)[0].text;
   }
 
   // 6. Care Timers
   if (lower.includes('timer')) {
     if (lower.includes('cancel')) {
-      const res = await mcpClient.callTool('care_timer', { action: 'cancel', name: 'check' });
-      return (res.content as any)[0].text;
+      return run('care_timer', { action: 'cancel', name: 'Care Task' });
     }
     if (lower.includes('check') || lower.includes('how long')) {
-      const res = await mcpClient.callTool('care_timer', { action: 'check', name: 'check' });
-      return (res.content as any)[0].text;
+      return run('care_timer', { action: 'check', name: 'Care Task' });
     }
     const match = text.match(/(\d+)\s*minute/i);
     const mins = match ? parseInt(match[1]) : 30;
-    const res = await mcpClient.callTool('care_timer', {
+    return run('care_timer', {
       action: 'start',
       name: 'Care Task',
       minutes: mins
     });
-    return (res.content as any)[0].text;
   }
 
   // 7. Caregiver Wellness Check-in
   if (lower.includes('check-in') || lower.includes('check in') || lower.includes('stressed') || lower.includes('exhausted') || lower.includes('burnout')) {
-    const res = await mcpClient.callTool('caregiver_checkin', {
+    return run('caregiver_checkin', {
       stressLevel: lower.includes('high') || lower.includes('exhausted') ? 4 : 2,
       restedLevel: lower.includes('exhausted') ? 2 : 4,
       notes: text
     });
-    return (res.content as any)[0].text;
   }
 
   // 8. Handoff Summary
   if (lower.includes('summary') || lower.includes('what happened') || lower.includes('handoff')) {
-    const result = await mcpClient.callTool('handoff_summary', { window: 'today' });
-    return (result.content as any)[0].text;
+    return run('handoff_summary', { window: 'today' });
   }
 
   // 9. Clinical Visit Export
   if (lower.includes('doctor visit') || lower.includes('export') || lower.includes('clinical report')) {
-    const result = await mcpClient.callTool('visit_export', { daysBack: 14 });
-    return (result.content as any)[0].text;
+    return run('visit_export', { daysBack: 14 });
   }
 
   // 10. Trend Insights
   if (lower.includes('trend') || lower.includes('pattern') || lower.includes('average')) {
-    const result = await mcpClient.callTool('trend_insights', { kind: 'bp', days: 7 });
-    return (result.content as any)[0].text;
+    return run('trend_insights', { kind: 'bp', days: 7 });
   }
 
   // 11. Observations / General Notes (Evaluated with Red Flag engine automatically)
@@ -157,9 +202,8 @@ export async function handleUserVoice(text: string, memberId: string): Promise<s
   else if (lower.includes('pain') || lower.includes('ache') || lower.includes('hurt')) cat = 'pain';
   else if (lower.includes('sleep') || lower.includes('nap') || lower.includes('tired')) cat = 'sleep';
 
-  const result = await mcpClient.callTool('log_observation', {
+  return run('log_observation', {
     category: cat,
     text
   });
-  return (result.content as any)[0].text;
 }

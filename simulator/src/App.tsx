@@ -91,11 +91,7 @@ export default function App() {
     setOrbState('thinking');
     
     try {
-      const reply = await handleUserVoice(textToProcess, member);
-      
-      // Check last trace safety
-      const lastTrace = traces[0];
-      const safety = lastTrace?.result?.structuredContent?.safety;
+      const { text: reply, safety } = await handleUserVoice(textToProcess, member);
 
       setLog(prev => [...prev, { role: 'agent', text: reply, safety }]);
       setOrbState('speaking');

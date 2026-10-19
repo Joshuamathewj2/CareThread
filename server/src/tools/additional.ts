@@ -3,18 +3,30 @@ import { randomUUID } from 'node:crypto';
 import { registry } from '../mcp/registry.js';
 import { db } from '../db/index.js';
 import { DateTime } from 'luxon';
+import { getCircle } from './shared.js';
 
 // --- question_for_doctor ---
 registry.registerTool({
   name: 'question_for_doctor',
-  description: 'Add, list, or mark done questions to ask the doctor at the next clinical visit',
+  title: 'Questions for the doctor',
+  description: 'Save, list, or mark done questions to ask at the next doctor visit',
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   schema: z.object({
     action: z.enum(['add', 'list', 'mark_done']).default('add'),
-    text: z.string().max(300).optional(),
-    questionId: z.string().optional()
+    text: z.string().max(300).optional().describe('The question for add; for mark_done, words from the question to match'),
+    questionId: z.string().optional().describe('Exact id for mark_done, from a previous list')
   }),
   roles: ['primary', 'family', 'aide', 'viewer'],
   handler: async (input, ctx) => {
+    if (input.action !== 'list' && ctx.role === 'viewer') {
+      return {
+        safetyLevel: 'error',
+        safetyCode: 'FORBIDDEN_ROLE',
+        spokenText: 'You can view the log but not change it. Ask the primary caregiver to add you.',
+        data: null
+      };
+    }
+
     if (input.action === 'add') {
       if (!input.text) {
         return {
@@ -34,15 +46,16 @@ registry.registerTool({
         safetyLevel: 'none',
         safetyCode: null,
         spokenText: `Saved for the next appointment: ${input.text}.`,
-        data: { questionId: qId, text: input.text, status: 'open' }
+        data: { questionId: qId, text: input.text, status: 'open' },
+        quotedUserText: [input.text]
       };
     }
 
     if (input.action === 'list') {
       const rows = db.prepare(`
-        SELECT id, text, status, created_at 
-        FROM doctor_questions 
-        WHERE circle_id = ? AND status = 'open' 
+        SELECT id, text, status, created_at
+        FROM doctor_questions
+        WHERE circle_id = ? AND status = 'open'
         ORDER BY created_at ASC
       `).all(ctx.circleId) as Array<{ id: string; text: string; status: string; created_at: string }>;
 
@@ -61,31 +74,62 @@ registry.registerTool({
         safetyLevel: 'none',
         safetyCode: null,
         spokenText: `${countText} saved. First: ${rows[0].text}.`,
-        data: { questions: rows }
+        data: { questions: rows },
+        quotedUserText: [rows[0].text]
       };
     }
 
     if (input.action === 'mark_done') {
-      if (!input.questionId) {
+      // Voice users can't say an id, so a few words from the question are enough to find it
+      let questionId = input.questionId;
+      if (!questionId && input.text) {
+        const matches = db.prepare(`
+          SELECT id, text FROM doctor_questions
+          WHERE circle_id = ? AND status = 'open' AND text LIKE ?
+          ORDER BY created_at ASC
+        `).all(ctx.circleId, `%${input.text}%`) as Array<{ id: string; text: string }>;
+        if (matches.length > 1) {
+          return {
+            safetyLevel: 'none',
+            safetyCode: 'AMBIGUOUS_QUESTION',
+            spokenText: `${matches.length} questions match. Which one: ${matches[0].text}, or ${matches[1].text}?`,
+            data: { candidates: matches },
+            quotedUserText: [matches[0].text, matches[1].text],
+            followUp: { kind: 'choose', prompt: 'Which question is done?', tool: 'question_for_doctor', arguments: { action: 'mark_done', text: '{choice}' }, choices: matches.map(m => m.text) }
+          };
+        }
+        questionId = matches[0]?.id;
+      }
+
+      if (!questionId) {
         return {
           safetyLevel: 'error',
           safetyCode: 'MISSING_ID',
           spokenText: 'Which question would you like to mark as done?',
-          data: { error: 'questionId required' }
+          data: { error: 'questionId or matching text required' }
         };
       }
 
-      db.prepare(`
-        UPDATE doctor_questions 
-        SET status = 'done' 
-        WHERE id = ? AND circle_id = ?
-      `).run(input.questionId, ctx.circleId);
+      const result = db.prepare(`
+        UPDATE doctor_questions
+        SET status = 'done'
+        WHERE id = ? AND circle_id = ? AND status = 'open'
+      `).run(questionId, ctx.circleId);
+
+      if (result.changes === 0) {
+        return {
+          safetyLevel: 'error',
+          safetyCode: 'QUESTION_NOT_FOUND',
+          spokenText: "I couldn't find that open question.",
+          data: { questionId }
+        };
+      }
 
       return {
         safetyLevel: 'none',
         safetyCode: null,
         spokenText: 'Marked question as done.',
-        data: { questionId: input.questionId, status: 'done' }
+        data: { questionId, status: 'done' }
       };
     }
 
@@ -101,11 +145,13 @@ registry.registerTool({
 // --- care_timer ---
 registry.registerTool({
   name: 'care_timer',
-  description: 'Start, check, or cancel an informational timer for caregiving tasks (not for medication administration)',
+  title: 'Care timer',
+  description: 'Start, check, or cancel a reminder timer for a care task (not a medication schedule)',
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   schema: z.object({
     action: z.enum(['start', 'check', 'cancel']).default('start'),
-    name: z.string().max(60),
-    minutes: z.number().int().min(1).max(720).optional()
+    name: z.string().max(60).default('Care task').describe('What the timer is for; check/cancel match on these words'),
+    minutes: z.number().int().min(1).max(720).optional().describe('Duration for start; defaults to 15')
   }),
   roles: ['primary', 'family', 'aide'],
   handler: async (input, ctx) => {
@@ -129,10 +175,10 @@ registry.registerTool({
 
     if (input.action === 'check') {
       const timer = db.prepare(`
-        SELECT id, name, ends_at 
-        FROM timers 
+        SELECT id, name, ends_at
+        FROM timers
         WHERE circle_id = ? AND name LIKE ? AND cancelled_at IS NULL
-        ORDER BY ends_at DESC 
+        ORDER BY ends_at DESC
         LIMIT 1
       `).get(ctx.circleId, `%${input.name}%`) as { id: string; name: string; ends_at: string } | undefined;
 
@@ -164,11 +210,20 @@ registry.registerTool({
     }
 
     if (input.action === 'cancel') {
-      db.prepare(`
-        UPDATE timers 
-        SET cancelled_at = ? 
-        WHERE circle_id = ? AND name LIKE ? AND cancelled_at IS NULL
-      `).run(ctx.now, ctx.circleId, `%${input.name}%`);
+      const result = db.prepare(`
+        UPDATE timers
+        SET cancelled_at = ?
+        WHERE circle_id = ? AND name LIKE ? AND cancelled_at IS NULL AND ends_at > ?
+      `).run(ctx.now, ctx.circleId, `%${input.name}%`, ctx.now);
+
+      if (result.changes === 0) {
+        return {
+          safetyLevel: 'none',
+          safetyCode: null,
+          spokenText: `No running timer found for ${input.name}.`,
+          data: { cancelled: false, name: input.name }
+        };
+      }
 
       return {
         safetyLevel: 'none',
@@ -190,12 +245,14 @@ registry.registerTool({
 // --- caregiver_checkin ---
 registry.registerTool({
   name: 'caregiver_checkin',
-  description: 'Caregiver wellness self-check (not clinical screening; routes crisis indications to emergency resources)',
+  title: 'Caregiver wellbeing check-in',
+  description: "The caregiver's own wellbeing check-in (not clinical screening). Crisis language routes to emergency help",
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   schema: z.object({
     action: z.enum(['start', 'answer', 'summary']).optional(),
-    stressLevel: z.number().min(1).max(5).optional(),
-    restedLevel: z.number().min(1).max(5).optional(),
-    notes: z.string().optional(),
+    stressLevel: z.number().int().min(1).max(5).optional().describe('1 calm to 5 overwhelmed'),
+    restedLevel: z.number().int().min(1).max(5).optional().describe('1 exhausted to 5 well rested'),
+    notes: z.string().max(1000).optional(),
     answer: z.union([z.number(), z.string()]).optional(),
     questionId: z.string().optional()
   }),
@@ -205,11 +262,12 @@ registry.registerTool({
     const allText = [input.notes, typeof input.answer === 'string' ? input.answer : ''].join(' ').toLowerCase();
     const crisisPatterns = ['harm myself', 'hurt myself', 'suicide', 'kill myself', 'end my life', 'want to die'];
     if (crisisPatterns.some(p => allText.includes(p))) {
+      const emergencyNumber = getCircle(ctx.circleId)?.emergency_number || '112';
       return {
         safetyLevel: 'redflag',
         safetyCode: 'CRISIS_SUPPORT',
-        spokenText: 'If you are thinking of harming yourself or need immediate help, please call or text 988 (or 112) right now to speak with someone. You are not alone.',
-        data: { crisis: true, hotline: '988' }
+        spokenText: `If you are thinking of harming yourself or need immediate help, please call ${emergencyNumber} or your local crisis line right now. You are not alone.`,
+        data: { crisis: true, emergencyNumber }
       };
     }
 
@@ -239,10 +297,9 @@ registry.registerTool({
 // --- trend_insights ---
 registry.registerTool({
   name: 'trend_insights',
-  description: 'Objective counts and pattern facts over a configurable period (no medical causes or predictions)',
-  annotations: {
-    readOnlyHint: true
-  },
+  title: 'Trends from the log',
+  description: 'Objective counts and averages over recent days (no medical causes or predictions)',
+  annotations: { readOnlyHint: true, idempotentHint: true },
   schema: z.object({
     metric: z.enum(['meals_eaten', 'confusion_episodes', 'sleep_issues', 'falls', 'vitals_out_of_range', 'doses_not_logged']).optional(),
     kind: z.enum(['bp', 'glucose', 'temperature', 'weight', 'pulse', 'spo2']).optional(),
@@ -263,8 +320,8 @@ registry.registerTool({
       };
       const term = keywordMap[input.metric];
       const obs = db.prepare(`
-        SELECT text, recorded_at 
-        FROM observations 
+        SELECT text, recorded_at
+        FROM observations
         WHERE circle_id = ? AND recorded_at >= ? AND (category = ? OR text LIKE ?)
         ORDER BY recorded_at ASC
       `).all(ctx.circleId, since, input.metric.split('_')[0], `%${term}%`) as Array<{ text: string; recorded_at: string }>;
@@ -290,8 +347,8 @@ registry.registerTool({
     // 2. Metric: vitals_out_of_range
     if (input.metric === 'vitals_out_of_range') {
       const outVitals = db.prepare(`
-        SELECT kind, value, recorded_at 
-        FROM vitals 
+        SELECT kind, value, recorded_at
+        FROM vitals
         WHERE circle_id = ? AND in_range = 0 AND recorded_at >= ?
       `).all(ctx.circleId, since) as Array<{ kind: string; value: number; recorded_at: string }>;
 

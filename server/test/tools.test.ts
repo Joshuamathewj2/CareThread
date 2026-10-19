@@ -4,9 +4,9 @@ import '../src/tools/medications.js';
 import '../src/tools/observations.js';
 import '../src/tools/reports.js';
 import '../src/tools/additional.js';
-import { setupDatabase } from '../src/db/index.js';
-import { AuthContext } from '../middleware/auth.js';
-import { authContextStorage } from '../index.js';
+import '../src/tools/context.js';
+import '../src/tools/askCareLog.js';
+import type { AuthContext } from '../src/middleware/auth.js';
 
 describe('Tool Registry and Handlers Conformance', () => {
   let ctx: AuthContext;
@@ -21,7 +21,7 @@ describe('Tool Registry and Handlers Conformance', () => {
     };
   });
 
-  it('All 10 canonical tools are registered with schemas', () => {
+  it('All canonical tools are registered with schemas', () => {
     const expectedTools = [
       'recipient_profile',
       'med_schedule_set',
@@ -35,7 +35,10 @@ describe('Tool Registry and Handlers Conformance', () => {
       'visit_export',
       'question_for_doctor',
       'care_timer',
-      'caregiver_checkin'
+      'caregiver_checkin',
+      'care_next_actions',
+      'undo_last_entry',
+      'ask_care_log'
     ];
 
     for (const toolName of expectedTools) {
