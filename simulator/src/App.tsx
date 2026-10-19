@@ -126,19 +126,43 @@ export default function App() {
     { label: "Handoff Summary", text: "Give me the handoff summary for today" }
   ];
 
+  const orbLabel: Record<typeof orbState, string> = {
+    idle: 'Ready',
+    listening: 'Listening',
+    thinking: 'Thinking',
+    speaking: 'Speaking'
+  };
+
+  const typeStyle = (type: string) =>
+    type === 'dose' ? 'bg-thread-soft text-thread' :
+    type === 'vital' ? 'bg-[#E6E9F7] text-[#3B4A9C]' :
+    type === 'redflag' ? 'bg-urgent-soft text-urgent' :
+    'bg-[#EFEBDF] text-[#6B5A22]';
+
+  const typeStripe = (type: string) =>
+    type === 'dose' ? 'bg-thread' :
+    type === 'vital' ? 'bg-[#5A6BD0]' :
+    type === 'redflag' ? 'bg-urgent' :
+    'bg-[#B79A3A]';
+
+  const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-thread';
+
   return (
-    <div className="flex h-screen w-full bg-[#0E1720] font-sans text-slate-100 overflow-hidden">
-      
-      {/* LEFT: Alexa Visual Simulator */}
-      <div className="w-1/3 flex flex-col border-r border-slate-800 bg-[#121D28] p-6 relative shadow-2xl">
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-emerald-400" />
-            <h1 className="font-semibold text-sm tracking-wide text-white uppercase">CareThread Voice Simulator</h1>
+    <div className="flex h-screen w-full bg-porcelain font-sans text-ink overflow-hidden">
+
+      {/* LEFT: Voice simulator */}
+      <section className="w-1/3 min-w-[340px] flex flex-col bg-panel border-r border-line p-6 relative" aria-label="Voice simulator">
+        <header className="flex items-center justify-between gap-3 pb-4 border-b border-line">
+          <div className="flex items-center gap-2.5">
+            <span className="grid place-items-center w-8 h-8 rounded-lg bg-thread text-white">
+              <Sparkles className="w-4 h-4" />
+            </span>
+            <h1 className="font-display font-bold text-lg leading-none tracking-tight">CareThread</h1>
           </div>
-          <select 
-            className="text-xs bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 outline-none focus:border-emerald-500"
-            value={member} 
+          <select
+            aria-label="Speaking as"
+            className={`text-sm bg-porcelain border border-line text-ink rounded-lg px-2.5 py-1.5 cursor-pointer ${focusRing}`}
+            value={member}
             onChange={e => setMember(e.target.value)}
           >
             <option value="m_priya">Priya (Primary Caregiver)</option>
@@ -146,59 +170,70 @@ export default function App() {
             <option value="m_meera">Meera (Home Aide)</option>
             <option value="m_guest">Guest (Read-Only Viewer)</option>
           </select>
-        </div>
-        
-        {/* Voice Orb Area */}
-        <div className="flex flex-col items-center justify-center my-6">
-          <div className={`w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 shadow-2xl relative
-            ${orbState === 'idle' ? 'bg-gradient-to-tr from-emerald-600/30 to-teal-500/20 border border-emerald-500/40 shadow-emerald-950/50' : ''}
-            ${orbState === 'listening' ? 'bg-gradient-to-tr from-cyan-500 to-blue-600 scale-110 shadow-cyan-500/40 animate-pulse' : ''}
-            ${orbState === 'thinking' ? 'bg-gradient-to-tr from-amber-500 to-orange-600 border-4 border-amber-300 border-t-amber-100 animate-spin shadow-amber-500/40' : ''}
-            ${orbState === 'speaking' ? 'bg-gradient-to-tr from-emerald-400 to-teal-500 scale-105 shadow-emerald-400/50 ring-4 ring-emerald-500/30' : ''}
-          `}>
-            {orbState === 'idle' && <span className="text-emerald-400 font-semibold text-sm tracking-wider">Alexa+</span>}
-            {orbState === 'listening' && <Mic className="w-8 h-8 text-white animate-bounce" />}
-            {orbState === 'speaking' && <Sparkles className="w-8 h-8 text-white" />}
+        </header>
+
+        {/* Voice orb */}
+        <div className="flex flex-col items-center justify-center my-7">
+          <div className="relative w-36 h-36 grid place-items-center">
+            <span
+              aria-hidden
+              className={`absolute inset-0 rounded-full border-[3px] transition-colors duration-300
+                ${orbState === 'idle' ? 'border-thread-soft' : ''}
+                ${orbState === 'listening' ? 'border-thread ring-listening' : ''}
+                ${orbState === 'thinking' ? 'border-line border-t-caution ring-thinking' : ''}
+                ${orbState === 'speaking' ? 'border-thread' : ''}`}
+            />
+            <div className={`w-28 h-28 rounded-full grid place-items-center transition-all duration-300
+              ${orbState === 'idle' ? 'bg-thread-soft text-thread' : ''}
+              ${orbState === 'listening' ? 'bg-thread text-white' : ''}
+              ${orbState === 'thinking' ? 'bg-caution-soft text-caution' : ''}
+              ${orbState === 'speaking' ? 'bg-thread text-white shadow-[0_0_0_8px_var(--color-thread-soft)]' : ''}`}>
+              {orbState === 'listening' ? <Mic className="w-8 h-8" /> :
+               orbState === 'speaking' ? <Sparkles className="w-8 h-8" /> :
+               <span className="font-display font-bold text-xl tracking-tight">Alexa+</span>}
+            </div>
           </div>
-          <div className="mt-3 text-xs uppercase tracking-widest text-slate-400 font-medium">
-            Status: <span className="text-emerald-400 font-semibold">{orbState}</span>
+          <div className="mt-3 text-sm text-ink-soft" aria-live="polite">
+            <span className="font-bold text-thread">{orbLabel[orbState]}</span>
           </div>
         </div>
 
-        {/* Input Controls */}
+        {/* Input controls */}
         <div className="w-full space-y-3">
           <div className="flex gap-2">
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={inputText}
               onChange={e => setInputText(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSend(inputText)}
-              placeholder="Speak or type caregiver command..."
-              className="flex-1 p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              placeholder="Speak or type a caregiver command..."
+              className={`flex-1 min-w-0 px-3.5 py-2.5 bg-porcelain border border-line rounded-xl text-sm text-ink placeholder:text-ink-soft/70 ${focusRing}`}
             />
-            <button 
-              onClick={() => handleSend(inputText)} 
-              className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors cursor-pointer"
+            <button
+              onClick={() => handleSend(inputText)}
+              className={`px-3.5 bg-thread hover:bg-[#185A53] text-white rounded-xl transition-colors cursor-pointer ${focusRing}`}
               title="Send Command"
+              aria-label="Send command"
             >
               <Send className="w-4 h-4" />
             </button>
-            <button 
-              onClick={toggleListen} 
-              className={`p-2.5 rounded-lg text-white transition-colors cursor-pointer ${isListening ? 'bg-red-500 animate-pulse' : 'bg-slate-700 hover:bg-slate-600'}`}
+            <button
+              onClick={toggleListen}
+              className={`px-3.5 rounded-xl transition-colors cursor-pointer ${focusRing} ${isListening ? 'bg-urgent text-white ring-listening' : 'bg-thread-soft text-thread hover:bg-[#C8E3DD]'}`}
               title="Toggle Microphone"
+              aria-label="Toggle microphone"
             >
               {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </button>
           </div>
 
-          {/* Quick Preset Buttons for Demo */}
-          <div className="flex flex-wrap gap-1.5 pt-1">
+          {/* Quick scenarios */}
+          <div className="flex flex-wrap gap-1.5">
             {demoPhrases.map((p, idx) => (
               <button
                 key={idx}
                 onClick={() => handleSend(p.text)}
-                className="text-[11px] bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white px-2 py-1 rounded border border-slate-700/60 transition cursor-pointer"
+                className={`text-xs bg-porcelain hover:bg-thread-soft text-ink-soft hover:text-thread px-2.5 py-1.5 rounded-full border border-line transition-colors cursor-pointer ${focusRing}`}
               >
                 {p.label}
               </button>
@@ -206,11 +241,11 @@ export default function App() {
           </div>
         </div>
 
-        {/* Answer Cards Conversation Log */}
-        <div className="mt-4 flex-1 overflow-y-auto space-y-3 pr-1 text-sm border-t border-slate-800 pt-3">
+        {/* Conversation */}
+        <div className="mt-5 flex-1 overflow-y-auto space-y-3 pr-1 text-sm border-t border-line pt-4">
           {log.length === 0 && (
-            <p className="text-slate-500 text-xs italic text-center mt-6">
-              Try clicking a quick scenario above or speaking a command to test the MCP safety guardrails.
+            <p className="text-ink-soft text-sm text-center mt-6 max-w-[28ch] mx-auto leading-relaxed">
+              Pick a scenario above or say a command to see CareThread's safety checks at work.
             </p>
           )}
           {log.map((entry, idx) => {
@@ -219,28 +254,28 @@ export default function App() {
             const isCaution = entry.safety?.level === 'caution';
 
             return (
-              <div 
-                key={idx} 
-                className={`p-3 rounded-lg border leading-relaxed ${
-                  isUser 
-                    ? 'bg-slate-800/60 border-slate-700/60 ml-6 text-slate-200' 
+              <div
+                key={idx}
+                className={`p-3.5 rounded-2xl leading-relaxed ${
+                  isUser
+                    ? 'bg-ink text-white ml-8 rounded-br-md'
                     : isRedFlag
-                    ? 'bg-red-950/40 border-red-800 text-red-100 mr-4'
+                    ? 'bg-urgent-soft text-[#5C100C] border-l-4 border-urgent mr-4 rounded-bl-md'
                     : isCaution
-                    ? 'bg-amber-950/40 border-amber-800 text-amber-100 mr-4'
-                    : 'bg-emerald-950/20 border-emerald-800/50 text-emerald-100 mr-4'
+                    ? 'bg-caution-soft text-[#4D3000] border-l-4 border-caution mr-4 rounded-bl-md'
+                    : 'bg-thread-soft text-[#0F3D38] mr-4 rounded-bl-md'
                 }`}
               >
-                <div className="flex items-center justify-between text-xs font-semibold mb-1 opacity-80">
+                <div className="flex items-center justify-between text-xs font-bold mb-1 opacity-80">
                   <span>{isUser ? 'Caregiver' : 'CareThread (Alexa+)'}</span>
                   {!isUser && isRedFlag && (
-                    <span className="flex items-center gap-1 text-red-400 font-bold">
-                      <ShieldAlert className="w-3.5 h-3.5" /> ESCALATION
+                    <span className="flex items-center gap-1 text-urgent">
+                      <ShieldAlert className="w-3.5 h-3.5" /> Escalation
                     </span>
                   )}
                   {!isUser && isCaution && (
-                    <span className="flex items-center gap-1 text-amber-400 font-bold">
-                      <AlertTriangle className="w-3.5 h-3.5" /> DOSE CAUTION
+                    <span className="flex items-center gap-1 text-caution">
+                      <AlertTriangle className="w-3.5 h-3.5" /> Dose caution
                     </span>
                   )}
                 </div>
@@ -249,106 +284,111 @@ export default function App() {
             );
           })}
         </div>
-      </div>
+      </section>
 
-      {/* MIDDLE: Live Care Timeline (U-05) */}
-      <div className="w-1/3 flex flex-col border-r border-slate-800 bg-[#0F1823] relative overflow-hidden">
-        <div className="p-4 bg-[#14202D] border-b border-slate-800 font-semibold flex items-center justify-between text-white text-sm shadow-sm">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-emerald-400" />
-            <span>Today's Care Timeline</span>
+      {/* MIDDLE: Live care timeline */}
+      <section className="w-1/3 min-w-[300px] flex flex-col border-r border-line relative overflow-hidden" aria-label="Care timeline">
+        <header className="px-6 py-4 border-b border-line flex items-center justify-between bg-porcelain">
+          <div className="flex items-center gap-2.5">
+            <Clock className="w-4 h-4 text-thread" />
+            <h2 className="font-display font-bold text-lg tracking-tight">Today's care timeline</h2>
           </div>
-          <button 
+          <button
             onClick={refreshTimeline}
-            className="text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded border border-slate-700 transition cursor-pointer"
+            className={`text-xs font-bold text-thread hover:bg-thread-soft px-3 py-1.5 rounded-full border border-thread/40 transition-colors cursor-pointer ${focusRing}`}
           >
             Refresh
           </button>
-        </div>
-        <div className="p-4 flex-1 overflow-y-auto space-y-3">
+        </header>
+        <div className="p-6 flex-1 overflow-y-auto">
           {timeline.length === 0 && (
-            <p className="text-slate-500 text-xs text-center mt-12">
-              No timeline events recorded yet today.
+            <p className="text-ink-soft text-sm text-center mt-16 max-w-[30ch] mx-auto leading-relaxed">
+              Nothing logged yet today. Log a dose or a note and it appears here.
             </p>
           )}
-          {timeline.map((ev, i) => {
-            const timeStr = new Date(ev.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          <ol className="relative space-y-3 before:content-[''] before:absolute before:left-[5px] before:top-2 before:bottom-2 before:w-px before:bg-line">
+            {timeline.map((ev, i) => {
+              const timeStr = new Date(ev.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              return (
+                <li key={i} className="relative pl-7">
+                  <span className={`absolute left-0 top-4 w-[11px] h-[11px] rounded-full ring-4 ring-porcelain ${typeStripe(ev.type)}`} aria-hidden />
+                  <div className="p-3.5 bg-panel rounded-xl border border-line hover:border-thread/40 transition-colors">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className={`px-2 py-0.5 rounded-full font-bold text-xs capitalize ${typeStyle(ev.type)}`}>
+                        {ev.type}
+                      </span>
+                      <span className="text-ink-soft text-xs tabular-nums">{timeStr}</span>
+                    </div>
+                    <div className="text-sm font-bold text-ink">{ev.title}</div>
+                    <div className="text-xs text-ink-soft mt-1 flex items-center justify-between">
+                      <span>Logged by {ev.member}</span>
+                      {ev.status && <span className="capitalize font-bold text-thread">{ev.status}</span>}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </section>
+
+      {/* RIGHT: MCP tool trace console */}
+      <section className="w-1/3 min-w-[320px] flex flex-col bg-console text-[#C9D6D2] text-xs font-mono" aria-label="MCP tool trace">
+        <header className="px-5 py-4 border-b border-console-line flex items-center justify-between text-white">
+          <div className="flex items-center gap-2.5">
+            <Activity className="w-4 h-4 text-[#5FD3C3]" />
+            <h2 className="font-display font-bold text-lg tracking-tight">MCP tool trace</h2>
+          </div>
+          <span className="text-xs text-[#5FD3C3] border border-[#2F5A54] px-2 py-0.5 rounded-full">
+            :3001/mcp
+          </span>
+        </header>
+        <div className="p-4 flex-1 overflow-y-auto space-y-3">
+          {traces.length === 0 && <p className="text-[#7F918C] text-xs">Waiting for MCP tool calls...</p>}
+          {traces.map((t, i) => {
+            const level = t.result?.structuredContent?.safety?.level;
+            const urgent = level === 'emergency';
+            const caution = level === 'caution';
             return (
-              <div key={i} className="p-3 bg-slate-900/90 rounded-lg border border-slate-800 hover:border-slate-700 transition">
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className={`px-2 py-0.5 rounded font-medium text-[10px] uppercase tracking-wider ${
-                    ev.type === 'dose' ? 'bg-blue-900/50 text-blue-300 border border-blue-800' :
-                    ev.type === 'vital' ? 'bg-purple-900/50 text-purple-300 border border-purple-800' :
-                    ev.type === 'redflag' ? 'bg-red-900/50 text-red-300 border border-red-800' :
-                    'bg-slate-800 text-slate-300 border border-slate-700'
+              <div key={i} className={`p-3 bg-[#1E2A27] rounded-lg border-l-4 ${urgent ? 'border-[#FF7A70]' : caution ? 'border-[#F0B04A]' : 'border-[#5FD3C3]'}`}>
+                <div className="flex justify-between items-center text-white font-semibold mb-2">
+                  <span className="text-sm">{t.tool}</span>
+                  <span className="text-[#7F918C] font-normal text-xs tabular-nums">{t.time.substring(11, 19)} UTC</span>
+                </div>
+                <div className="mb-2">
+                  <span className="text-[#7F918C]">Arguments</span>
+                  <pre className="text-[#C9D6D2] bg-console p-2 rounded-md overflow-x-auto mt-1">
+                    {JSON.stringify(t.args, null, 2)}
+                  </pre>
+                </div>
+                {t.result && (
+                  <div className={`mt-1.5 p-2 rounded-md ${
+                    urgent
+                      ? 'bg-[#3A1B19] border border-[#7A332E] text-[#FFD4D0]'
+                      : caution
+                      ? 'bg-[#352A14] border border-[#7A5A1E] text-[#FFE3B0]'
+                      : 'bg-console border border-console-line text-[#C9D6D2]'
                   }`}>
-                    {ev.type}
-                  </span>
-                  <span className="text-slate-400 text-[11px]">{timeStr}</span>
-                </div>
-                <div className="text-sm font-medium text-slate-100">{ev.title}</div>
-                <div className="text-xs text-slate-400 mt-1 flex items-center justify-between">
-                  <span>Logged by {ev.member}</span>
-                  {ev.status && <span className="capitalize text-emerald-400">{ev.status}</span>}
-                </div>
+                    <div className="flex items-center gap-1.5 font-semibold mb-1">
+                      <CheckCircle className="w-3 h-3 text-[#5FD3C3]" />
+                      <span>Structured content</span>
+                    </div>
+                    <pre className="overflow-x-auto">
+                      {JSON.stringify(t.result.structuredContent, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                {t.error && (
+                  <div className="mt-1.5 p-2 rounded-md bg-[#3A1B19] border border-[#7A332E] text-[#FFD4D0]">
+                    <span className="font-bold">Error: </span>
+                    {t.error.message}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
-      </div>
-
-      {/* RIGHT: MCP Tool Trace Panel (U-06) */}
-      <div className="w-1/3 flex flex-col bg-[#0A1017] text-slate-300 text-xs font-mono">
-        <div className="p-4 bg-[#0E1721] border-b border-slate-800 font-semibold flex items-center justify-between text-white">
-          <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-emerald-400" />
-            <span>MCP Tool Trace & Protocol</span>
-          </div>
-          <span className="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded font-mono">
-            PORT 3001
-          </span>
-        </div>
-        <div className="p-4 flex-1 overflow-y-auto space-y-3">
-          {traces.length === 0 && <p className="text-slate-600 text-xs italic">Waiting for MCP tool calls...</p>}
-          {traces.map((t, i) => (
-            <div key={i} className="p-3 bg-slate-900/80 rounded border border-slate-800">
-              <div className="flex justify-between items-center text-emerald-400 font-bold mb-1.5">
-                <span>{t.tool}</span>
-                <span className="text-slate-500 font-normal text-[10px]">{t.time.substring(11, 19)} UTC</span>
-              </div>
-              <div className="mb-2 text-[11px]">
-                <span className="text-slate-500">Arguments: </span>
-                <pre className="text-slate-300 bg-slate-950/60 p-1.5 rounded overflow-x-auto mt-0.5">
-                  {JSON.stringify(t.args, null, 2)}
-                </pre>
-              </div>
-              {t.result && (
-                <div className={`mt-1.5 p-2 rounded text-[11px] ${
-                  t.result.structuredContent?.safety?.level === 'emergency' 
-                    ? 'bg-red-950/40 border border-red-700/60 text-red-200' 
-                    : t.result.structuredContent?.safety?.level === 'caution'
-                    ? 'bg-amber-950/40 border border-amber-700/60 text-amber-200'
-                    : 'bg-slate-950/60 border border-slate-800 text-slate-300'
-                }`}>
-                  <div className="flex items-center gap-1 font-semibold mb-1">
-                    <CheckCircle className="w-3 h-3 text-emerald-400" />
-                    <span>Response Structured Content:</span>
-                  </div>
-                  <pre className="overflow-x-auto text-[10px]">
-                    {JSON.stringify(t.result.structuredContent, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {t.error && (
-                <div className="mt-1.5 p-2 rounded bg-red-950/50 border border-red-800 text-red-300">
-                  <span className="text-red-400 font-bold">Error: </span>
-                  {t.error.message}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+      </section>
 
     </div>
   );

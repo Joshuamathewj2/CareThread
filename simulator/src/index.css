@@ -1,26 +1,44 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", system-ui, sans-serif;
-  
-  --color-slate-50: #F8FAFC;
-  --color-slate-100: #F1F5F9;
-  --color-slate-200: #E2E8F0;
-  --color-slate-500: #64748B;
-  --color-slate-800: #1E293B;
-  --color-slate-900: #0F172A;
-  
-  --color-blue-500: #3B82F6;
-  --color-blue-600: #2563EB;
-  
-  --color-red-500: #EF4444;
-  --color-amber-500: #F59E0B;
+  --font-sans: "Atkinson Hyperlegible", system-ui, sans-serif;
+  --font-display: "Bricolage Grotesque", "Atkinson Hyperlegible", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-porcelain: #EDF1EF;
+  --color-panel: #FFFFFF;
+  --color-ink: #1C2B29;
+  --color-ink-soft: #55655F;
+  --color-line: #D6DFDB;
+  --color-thread: #1F6F66;
+  --color-thread-soft: #DCEDE9;
+  --color-caution: #B26B00;
+  --color-caution-soft: #FFF3DC;
+  --color-urgent: #B3261E;
+  --color-urgent-soft: #FCE8E6;
+  --color-console: #17201E;
+  --color-console-line: #2A3633;
 }
 
 body {
-  background-color: #0E1720;
-  color: #F8FAFC;
+  background-color: var(--color-porcelain);
+  color: var(--color-ink);
   margin: 0;
   padding: 0;
-  overflow: hidden;
+}
+
+@keyframes ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ring-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.06); opacity: 0.75; }
+}
+
+.ring-thinking { animation: ring-spin 1.1s linear infinite; }
+.ring-listening { animation: ring-breathe 1.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ring-thinking, .ring-listening { animation: none; }
 }
